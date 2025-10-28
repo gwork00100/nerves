@@ -1,0 +1,29 @@
+<<<<<<< HEAD
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Environment variables
+.env
+huggingface.py
+
+# Docker
+*.dockerfile
+**/Dockerfile
+*.tar
+*.log
+
+# Ollama local models
+/root/.ollama/models/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+=======
+>>>>>>> 416e9b7 (Initial commit)
+.env
