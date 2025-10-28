@@ -1,32 +1,20 @@
 import express from 'express'
 import fetch from 'node-fetch'
 import { createClient } from '@supabase/supabase-js'
-<<<<<<< HEAD
 import dotenv from 'dotenv'
 
 dotenv.config() // Load environment variables from .env
-=======
->>>>>>> 416e9b7 (Initial commit)
 
 const app = express()
 app.use(express.json())
 
 // ---------------- Supabase setup ----------------
-<<<<<<< HEAD
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_KEY = process.env.SUPABASE_KEY
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 // ---------------- Ollama setup ----------------
 const OLLAMA_URL = process.env.OLLAMA_HOST || 'http://localhost:11434/api/generate'
-=======
-const SUPABASE_URL = 'https://ajkemrtlmbuvyjkrioze.supabase.co'
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFqa2VtcnRsbWJ1dnlqa3Jpb3plIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDg4MTc3NCwiZXhwIjoyMDc2NDU3Nzc0fQ.Y5T6WWzp__A0e8Z0p_zaqtNutwrwCOpic6_hkqcCLjY'
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
-
-// ---------------- Ollama setup ----------------
-const OLLAMA_URL = 'http://localhost:11434/api/generate'
->>>>>>> 416e9b7 (Initial commit)
 
 // Query any Ollama model
 async function queryModel(model, prompt, system = '') {
@@ -97,9 +85,6 @@ app.post('/api/query', async (req, res) => {
 
 app.get('/', (req, res) => res.send('✅ Multi-LLM Pro running (TinyLlama + Phi-3-mini)'))
 
-<<<<<<< HEAD
+// Use Render's assigned PORT or fallback to 3000
 const PORT = process.env.PORT || 3000
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`))
-=======
-app.listen(3000, () => console.log('Server running on port 3000'))
->>>>>>> 416e9b7 (Initial commit)
