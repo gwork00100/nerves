@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Node.js
 node_modules/
 npm-debug.log
@@ -7,6 +6,9 @@ yarn-error.log
 # Environment variables
 .env
 huggingface.py
+
+# Allow this Dockerfile
+!ollama/Dockerfile
 
 # Docker
 *.dockerfile
@@ -24,6 +26,4 @@ Thumbs.db
 # IDEs
 .vscode/
 .idea/
-=======
->>>>>>> 416e9b7 (Initial commit)
-.env
+!ollama/Dockerfile
