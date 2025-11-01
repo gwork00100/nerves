@@ -64,6 +64,8 @@ async function saveTrend(prompt, output) {
 }
 
 // ---------------- API endpoints ----------------
+
+// 1️⃣  Main LLM endpoint
 app.post('/api/query', async (req, res) => {
   try {
     const { prompt } = req.body
@@ -83,8 +85,33 @@ app.post('/api/query', async (req, res) => {
   }
 })
 
+// 2️⃣  Health check
 app.get('/', (req, res) => res.send('✅ Multi-LLM Pro running (TinyLlama + Phi-3-mini)'))
 
-// Use Render's assigned PORT or fallback to 3000
+// 3️⃣  🔁 NEW: Proxy endpoint to fetch bones data (for n8n “blood”)
+app.get('/daily-trends', async (req, res) => {
+  try {
+    // 👇 replace with your actual GitHub repo URL or bones API
+    const bonesURL = 'https://raw.githubusercontent.com/<YOUR-GITHUB-USERNAME>/<BONES-REPO>/main/data/trends.json'
+
+    const bonesResponse = await fetch(bonesURL)
+    if (!bonesResponse.ok) {
+      throw new Error(`Failed to fetch bones data: ${bonesResponse.status}`)
+    }
+
+    const bonesData = await bonesResponse.json()
+
+    // Optionally log or store to Supabase
+    console.log('Fetched bones data:', bonesData?.length || Object.keys(bonesData).length)
+
+    // Send data to blood (n8n)
+    res.json({ source: 'bones', data: bonesData })
+  } catch (err) {
+    console.error('Failed to fetch from bones:', err)
+    res.status(500).json({ detail: 'Failed to fetch from bones.' })
+  }
+})
+
+// ---------------- Server ----------------
 const PORT = process.env.PORT || 3000
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`))
+app.listen(PORT, () => console.log(`🧠 Server running on port ${PORT}`))
