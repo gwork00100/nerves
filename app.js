@@ -75,7 +75,6 @@ app.post('/api/query', async (req, res) => {
     const output = await processPrompt(prompt)
     const duration = ((Date.now() - start) / 1000).toFixed(2)
 
-    // Save to Supabase
     await saveTrend(prompt, output)
 
     res.json({ model: 'tinyllama + phi3:mini', time: `${duration}s`, output })
@@ -88,11 +87,11 @@ app.post('/api/query', async (req, res) => {
 // 2️⃣  Health check
 app.get('/', (req, res) => res.send('✅ Multi-LLM Pro running (TinyLlama + Phi-3-mini)'))
 
-// 3️⃣  🔁 NEW: Proxy endpoint to fetch bones data (for n8n “blood”)
+// 3️⃣  🔁 Proxy endpoint to fetch bones data (for n8n “blood”)
 app.get('/daily-trends', async (req, res) => {
   try {
-    // 👇 replace with your actual GitHub repo URL or bones API
-    const bonesURL = 'https://raw.githubusercontent.com/<YOUR-GITHUB-USERNAME>/<BONES-REPO>/main/data/trends.json'
+    // 🔹 Replace with your actual GitHub username and bones repo
+    const bonesURL = 'https://raw.githubusercontent.com/gwork00100/bones/main/data/trends.json'
 
     const bonesResponse = await fetch(bonesURL)
     if (!bonesResponse.ok) {
@@ -101,10 +100,8 @@ app.get('/daily-trends', async (req, res) => {
 
     const bonesData = await bonesResponse.json()
 
-    // Optionally log or store to Supabase
     console.log('Fetched bones data:', bonesData?.length || Object.keys(bonesData).length)
 
-    // Send data to blood (n8n)
     res.json({ source: 'bones', data: bonesData })
   } catch (err) {
     console.error('Failed to fetch from bones:', err)
