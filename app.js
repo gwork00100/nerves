@@ -65,7 +65,7 @@ async function saveTrend(prompt, output) {
 
 // ---------------- API endpoints ----------------
 
-// 1️⃣  Main LLM endpoint
+// 1️⃣ Main LLM endpoint
 app.post('/api/query', async (req, res) => {
   try {
     const { prompt } = req.body
@@ -84,14 +84,13 @@ app.post('/api/query', async (req, res) => {
   }
 })
 
-// 2️⃣  Health check
+// 2️⃣ Health check
 app.get('/', (req, res) => res.send('✅ Multi-LLM Pro running (TinyLlama + Phi-3-mini)'))
 
-// 3️⃣  🔁 Proxy endpoint to fetch bones data (for n8n “blood”)
+// 3️⃣ 🔁 Proxy endpoint to fetch bones data (heartbeat_log.json)
 app.get('/daily-trends', async (req, res) => {
   try {
-    // 🔹 Replace with your actual GitHub username and bones repo
-    const bonesURL = 'https://raw.githubusercontent.com/gwork00100/bones/main/data/trends.json'
+    const bonesURL = 'https://raw.githubusercontent.com/gwork00100/bones/main/heartbeat_log.json'
 
     const bonesResponse = await fetch(bonesURL)
     if (!bonesResponse.ok) {
