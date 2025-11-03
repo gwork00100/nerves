@@ -3,7 +3,7 @@ import fetch from 'node-fetch'
 import { createClient } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
 
-dotenv.config() // Load environment variables from .env
+dotenv.config()
 
 const app = express()
 app.use(express.json())
@@ -13,10 +13,12 @@ const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_KEY = process.env.SUPABASE_KEY
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
-// ---------------- Ollama setup ----------------
+// ---------------- External Services ----------------
+const BONES_URL = process.env.BONES_URL || 'https://raw.githubusercontent.com/gwork00100/bones/main/heartbeat_log.json'
+const BLOOD_URL = process.env.BLOOD_URL || 'https://blood.onrender.com/api/update'
 const OLLAMA_URL = process.env.OLLAMA_HOST || 'http://localhost:11434/api/generate'
 
-// Query any Ollama model
+// ---------------- Helper: Query Ollama ----------------
 async function queryModel(model, prompt, system = '') {
   const res = await fetch(OLLAMA_URL, {
     method: 'POST',
@@ -31,7 +33,6 @@ async function queryModel(model, prompt, system = '') {
   return data.response
 }
 
-// Model selector logic
 function selectModel(prompt) {
   const len = prompt.length
   const hasCode = /function|class|def|<|>|\{|\}/i.test(prompt)
@@ -40,7 +41,6 @@ function selectModel(prompt) {
   return 'phi3:mini'
 }
 
-// Main chain
 async function processPrompt(prompt) {
   const primary = selectModel(prompt)
   if (primary === 'tinyllama') return await queryModel('tinyllama', prompt)
@@ -53,19 +53,96 @@ async function processPrompt(prompt) {
   return refined
 }
 
-// ---------------- Supabase save function ----------------
-async function saveTrend(prompt, output) {
-  const { data, error } = await supabase
-    .from('trends')
-    .insert([{ keyword: prompt.slice(0, 50), interest: output.slice(0, 255), fetched_at: new Date() }])
-  
-  if (error) console.error('Supabase insert error:', error)
-  else console.log('Saved to Supabase:', data)
+// ---------------- Retry helper ----------------
+async function retry(fn, attempts = 3, delayMs = 2000) {
+  let lastError
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastError = err
+      console.warn(`⚠️ Attempt ${i + 1} failed:`, err.message)
+      await new Promise(r => setTimeout(r, delayMs))
+    }
+  }
+  throw lastError
 }
 
-// ---------------- API endpoints ----------------
+// ---------------- Supabase save ----------------
+async function saveTrend(prompt, output) {
+  await retry(async () => {
+    const { data, error } = await supabase
+      .from('trends')
+      .insert([{
+        keyword: prompt.slice(0, 50),
+        interest: JSON.stringify(output).slice(0, 255),
+        fetched_at: new Date()
+      }])
+    
+    if (error) throw error
+    console.log('Saved to Supabase:', data)
+  })
+}
 
-// 1️⃣ Main LLM endpoint
+// ---------------- Concurrent processing of trends ----------------
+async function processTrend(trend) {
+  await retry(async () => {
+    console.log("🧩 Processing trend:", trend.title)
+
+    // AI Analysis
+    const mindRes = await fetch("http://mind-2wn3.onrender.com/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: `Analyze this trend: ${trend.title}`,
+        type: "analysis"
+      }),
+    })
+    const mindData = await mindRes.json()
+    console.log("🧠 AI output:", mindData.output)
+
+    // Push to blood
+    const bloodRes = await fetch(BLOOD_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        trend: trend.title,
+        analysis: mindData.output,
+        score: mindData.score,
+      }),
+    })
+    if (!bloodRes.ok) throw new Error(`Failed to push to blood: ${bloodRes.status}`)
+    console.log("💾 Sent analysis to blood")
+
+    // Save to Supabase
+    await saveTrend(trend.title, mindData)
+
+  }, 3, 3000) // 3 attempts, 3s delay
+}
+
+// ---------------- Central Scheduler Loop ----------------
+async function mainLoop() {
+  while (true) {
+    try {
+      console.log("🔄 Fetching heartbeat_log from bones...")
+      const heartbeatRes = await fetch(BONES_URL)
+      const heartbeatData = await heartbeatRes.json()
+
+      console.log(`✅ Retrieved ${heartbeatData.length} trend items.`)
+
+      // Process all trends concurrently with retries
+      await Promise.all(heartbeatData.map(trend => processTrend(trend)))
+
+    } catch (err) {
+      console.error("❌ Error in main loop:", err)
+    }
+
+    console.log("⏳ Waiting 10 minutes before next loop...")
+    await new Promise(r => setTimeout(r, 10 * 60 * 1000))
+  }
+}
+
+// ---------------- API Endpoints ----------------
 app.post('/api/query', async (req, res) => {
   try {
     const { prompt } = req.body
@@ -76,31 +153,20 @@ app.post('/api/query', async (req, res) => {
     const duration = ((Date.now() - start) / 1000).toFixed(2)
 
     await saveTrend(prompt, output)
-
-    res.json({ model: 'tinyllama + phi3:mini', time: `${duration}s`, output })
+    res.json({ model: 'multi-LLM + dynamic APIs', time: `${duration}s`, output })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err.message })
   }
 })
 
-// 2️⃣ Health check
-app.get('/', (req, res) => res.send('✅ Multi-LLM Pro running (TinyLlama + Phi-3-mini)'))
+app.get('/', (req, res) => res.send('✅ Multi-LLM Pro running with dynamic API fetcher'))
 
-// 3️⃣ 🔁 Proxy endpoint to fetch bones data (heartbeat_log.json)
 app.get('/daily-trends', async (req, res) => {
   try {
-    const bonesURL = 'https://raw.githubusercontent.com/gwork00100/bones/main/heartbeat_log.json'
-
-    const bonesResponse = await fetch(bonesURL)
-    if (!bonesResponse.ok) {
-      throw new Error(`Failed to fetch bones data: ${bonesResponse.status}`)
-    }
-
-    const bonesData = await bonesResponse.json()
-
-    console.log('Fetched bones data:', bonesData?.length || Object.keys(bonesData).length)
-
+    const bonesRes = await fetch(BONES_URL)
+    if (!bonesRes.ok) throw new Error(`Failed: ${bonesRes.status}`)
+    const bonesData = await bonesRes.json()
     res.json({ source: 'bones', data: bonesData })
   } catch (err) {
     console.error('Failed to fetch from bones:', err)
@@ -108,6 +174,9 @@ app.get('/daily-trends', async (req, res) => {
   }
 })
 
-// ---------------- Server ----------------
+// ---------------- Start ----------------
 const PORT = process.env.PORT || 3000
-app.listen(PORT, () => console.log(`🧠 Server running on port ${PORT}`))
+app.listen(PORT, () => {
+  console.log(`🧠 Nerves server running on port ${PORT}`)
+  mainLoop()
+})
