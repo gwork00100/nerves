@@ -33,26 +33,6 @@ async function queryModel(model, prompt, system = '') {
   return data.response
 }
 
-function selectModel(prompt) {
-  const len = prompt.length
-  const hasCode = /function|class|def|<|>|\{|\}/i.test(prompt)
-  if (hasCode) return 'phi3:mini'
-  if (len < 120) return 'tinyllama'
-  return 'phi3:mini'
-}
-
-async function processPrompt(prompt) {
-  const primary = selectModel(prompt)
-  if (primary === 'tinyllama') return await queryModel('tinyllama', prompt)
-
-  const outline = await queryModel('tinyllama', `Summarize or outline key points:\n${prompt}`)
-  const refined = await queryModel(
-    'phi3:mini',
-    `Using this outline, write a clear and accurate answer:\n${outline}\n\nUser question:\n${prompt}`
-  )
-  return refined
-}
-
 // ---------------- Retry helper ----------------
 async function retry(fn, attempts = 3, delayMs = 2000) {
   let lastError
@@ -68,98 +48,122 @@ async function retry(fn, attempts = 3, delayMs = 2000) {
   throw lastError
 }
 
-// ---------------- Supabase save ----------------
-async function saveTrend(prompt, output) {
-  await retry(async () => {
-    const { data, error } = await supabase
-      .from('trends')
-      .insert([{
-        keyword: prompt.slice(0, 50),
-        interest: JSON.stringify(output).slice(0, 255),
-        fetched_at: new Date()
-      }])
-    
-    if (error) throw error
-    console.log('Saved to Supabase:', data)
-  })
-}
+// ---------------- Step 3.1: Fetch conversation context ----------------
+async function fetchConversationContext(conversationId, limit = 10) {
+  try {
+    const { data: messages, error: msgErr } = await supabase
+      .from('conversation_memory')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(limit)
 
-// ---------------- Concurrent processing of trends ----------------
-async function processTrend(trend) {
-  await retry(async () => {
-    console.log("🧩 Processing trend:", trend.title)
+    if (msgErr) throw msgErr
 
-    // AI Analysis
-    const mindRes = await fetch("http://mind-2wn3.onrender.com/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt: `Analyze this trend: ${trend.title}`,
-        type: "analysis"
-      }),
-    })
-    const mindData = await mindRes.json()
-    console.log("🧠 AI output:", mindData.output)
+    const { data: highScoring, error: scoreErr } = await supabase
+      .from('conversation_memory')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .gt('score', 8)
+      .order('score', { ascending: false })
+      .limit(5)
 
-    // Push to blood
-    const bloodRes = await fetch(BLOOD_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        trend: trend.title,
-        analysis: mindData.output,
-        score: mindData.score,
-      }),
-    })
-    if (!bloodRes.ok) throw new Error(`Failed to push to blood: ${bloodRes.status}`)
-    console.log("💾 Sent analysis to blood")
+    if (scoreErr) console.warn('Error fetching high-scoring outputs:', scoreErr)
 
-    // Save to Supabase
-    await saveTrend(trend.title, mindData)
-
-  }, 3, 3000) // 3 attempts, 3s delay
-}
-
-// ---------------- Central Scheduler Loop ----------------
-async function mainLoop() {
-  while (true) {
-    try {
-      console.log("🔄 Fetching heartbeat_log from bones...")
-      const heartbeatRes = await fetch(BONES_URL)
-      const heartbeatData = await heartbeatRes.json()
-
-      console.log(`✅ Retrieved ${heartbeatData.length} trend items.`)
-
-      // Process all trends concurrently with retries
-      await Promise.all(heartbeatData.map(trend => processTrend(trend)))
-
-    } catch (err) {
-      console.error("❌ Error in main loop:", err)
-    }
-
-    console.log("⏳ Waiting 10 minutes before next loop...")
-    await new Promise(r => setTimeout(r, 10 * 60 * 1000))
+    return [...messages.reverse(), ...(highScoring || [])]
+  } catch (err) {
+    console.error('Error fetching conversation context:', err)
+    return []
   }
 }
 
-// ---------------- API Endpoints ----------------
-app.post('/api/query', async (req, res) => {
+// ---------------- Step 3.2: Generate AI reply ----------------
+async function generateAIReply(conversationContext, nervesData = {}, trendData = []) {
+  const contextText = conversationContext
+    .map(msg => `${msg.role === 'user' ? 'User' : 'AI'}: ${msg.ai_output || msg.content}`)
+    .join('\n')
+
+  let prompt = `${contextText}\n\nRespond naturally to the conversation.`
+
+  if ((nervesData && Object.keys(nervesData).length) || trendData.length) {
+    prompt += `\n\nAdditional Data:`
+    if (nervesData && Object.keys(nervesData).length) {
+      prompt += `\nNerves: ${JSON.stringify(nervesData)}`
+    }
+    if (trendData.length) {
+      prompt += `\nTrends: ${JSON.stringify(trendData)}`
+    }
+  }
+
+  const model = prompt.length < 120 ? 'tinyllama' : 'phi3:mini'
+  return await queryModel(model, prompt)
+}
+
+// ---------------- Step 3.3: Store AI reply ----------------
+async function storeAIReply(conversationId, userMessage, aiOutput, score = 0) {
   try {
-    const { prompt } = req.body
-    if (!prompt) return res.status(400).json({ error: 'Missing prompt' })
+    const { data, error } = await supabase
+      .from('conversation_memory')
+      .insert([{
+        conversation_id: conversationId,
+        role: 'ai',
+        content: userMessage,
+        ai_output: aiOutput,
+        score,
+        status: 'processed',
+        created_at: new Date()
+      }])
 
-    const start = Date.now()
-    const output = await processPrompt(prompt)
-    const duration = ((Date.now() - start) / 1000).toFixed(2)
+    if (error) throw error
+    return data
+  } catch (err) {
+    console.error('Error storing AI reply:', err)
+    return null
+  }
+}
 
-    await saveTrend(prompt, output)
-    res.json({ model: 'multi-LLM + dynamic APIs', time: `${duration}s`, output })
+// ---------------- Fetch trends from Bones ----------------
+async function fetchTrends(limit = 5) {
+  try {
+    const res = await fetch(BONES_URL)
+    if (!res.ok) throw new Error(`Failed: ${res.status}`)
+    const data = await res.json()
+    return data.slice(0, limit) // top N trends
+  } catch (err) {
+    console.error('Failed to fetch trends:', err)
+    return []
+  }
+}
+
+// ---------------- API Endpoint: Chat (Mind-aware) ----------------
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { conversation_id, message, nerves } = req.body
+    if (!conversation_id || !message) return res.status(400).json({ error: 'Missing conversation_id or message' })
+
+    // 1️⃣ Fetch conversation context
+    const context = await fetchConversationContext(conversation_id)
+
+    // Add new user message
+    context.push({ role: 'user', content: message })
+
+    // 1.5️⃣ Fetch trend data
+    const trends = await fetchTrends()
+
+    // 2️⃣ Generate AI reply with context + nerves + trends
+    const aiReply = await generateAIReply(context, nerves, trends)
+
+    // 3️⃣ Store AI reply
+    await storeAIReply(conversation_id, message, aiReply)
+
+    res.json({ output: aiReply })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err.message })
   }
 })
 
+// ---------------- Existing endpoints (unchanged) ----------------
 app.get('/', (req, res) => res.send('✅ Multi-LLM Pro running with dynamic API fetcher'))
 
 app.get('/daily-trends', async (req, res) => {
@@ -174,9 +178,8 @@ app.get('/daily-trends', async (req, res) => {
   }
 })
 
-// ---------------- Start ----------------
+// ---------------- Start server ----------------
 const PORT = process.env.PORT || 3000
 app.listen(PORT, () => {
   console.log(`🧠 Nerves server running on port ${PORT}`)
-  mainLoop()
 })
