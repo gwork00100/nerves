@@ -1,3 +1,4 @@
+// app.js
 import express from 'express'
 import fetch from 'node-fetch'
 import { createClient } from '@supabase/supabase-js'
@@ -48,7 +49,7 @@ async function retry(fn, attempts = 3, delayMs = 2000) {
   throw lastError
 }
 
-// ---------------- Step 3.1: Fetch conversation context ----------------
+// ---------------- Fetch conversation context ----------------
 async function fetchConversationContext(conversationId, limit = 10) {
   try {
     const { data: messages, error: msgErr } = await supabase
@@ -77,7 +78,7 @@ async function fetchConversationContext(conversationId, limit = 10) {
   }
 }
 
-// ---------------- Step 3.2: Generate AI reply ----------------
+// ---------------- Generate AI reply ----------------
 async function generateAIReply(conversationContext, nervesData = {}, trendData = []) {
   const contextText = conversationContext
     .map(msg => `${msg.role === 'user' ? 'User' : 'AI'}: ${msg.ai_output || msg.content}`)
@@ -99,7 +100,7 @@ async function generateAIReply(conversationContext, nervesData = {}, trendData =
   return await queryModel(model, prompt)
 }
 
-// ---------------- Step 3.3: Store AI reply ----------------
+// ---------------- Store AI reply ----------------
 async function storeAIReply(conversationId, userMessage, aiOutput, score = 0) {
   try {
     const { data, error } = await supabase
@@ -128,32 +129,32 @@ async function fetchTrends(limit = 5) {
     const res = await fetch(BONES_URL)
     if (!res.ok) throw new Error(`Failed: ${res.status}`)
     const data = await res.json()
-    return data.slice(0, limit) // top N trends
+    return data.slice(0, limit)
   } catch (err) {
     console.error('Failed to fetch trends:', err)
     return []
   }
 }
 
-// ---------------- API Endpoint: Chat (Mind-aware) ----------------
+// ---------------- API Endpoints ----------------
+
+// Mind-aware chat
 app.post('/api/chat', async (req, res) => {
   try {
     const { conversation_id, message, nerves } = req.body
     if (!conversation_id || !message) return res.status(400).json({ error: 'Missing conversation_id or message' })
 
-    // 1️⃣ Fetch conversation context
+    // Fetch conversation context and add new user message
     const context = await fetchConversationContext(conversation_id)
-
-    // Add new user message
     context.push({ role: 'user', content: message })
 
-    // 1.5️⃣ Fetch trend data
+    // Fetch trends from Bones
     const trends = await fetchTrends()
 
-    // 2️⃣ Generate AI reply with context + nerves + trends
+    // Generate AI reply
     const aiReply = await generateAIReply(context, nerves, trends)
 
-    // 3️⃣ Store AI reply
+    // Store AI reply
     await storeAIReply(conversation_id, message, aiReply)
 
     res.json({ output: aiReply })
@@ -163,9 +164,13 @@ app.post('/api/chat', async (req, res) => {
   }
 })
 
-// ---------------- Existing endpoints (unchanged) ----------------
+// Minimal ping endpoint for cron-job monitoring
+app.get('/ping', (req, res) => res.send('OK'))
+
+// Root endpoint
 app.get('/', (req, res) => res.send('✅ Multi-LLM Pro running with dynamic API fetcher'))
 
+// Daily trends endpoint
 app.get('/daily-trends', async (req, res) => {
   try {
     const bonesRes = await fetch(BONES_URL)
