@@ -144,17 +144,13 @@ app.post('/api/chat', async (req, res) => {
     const { conversation_id, message, nerves } = req.body
     if (!conversation_id || !message) return res.status(400).json({ error: 'Missing conversation_id or message' })
 
-    // Fetch conversation context and add new user message
     const context = await fetchConversationContext(conversation_id)
     context.push({ role: 'user', content: message })
 
-    // Fetch trends from Bones
     const trends = await fetchTrends()
 
-    // Generate AI reply
     const aiReply = await generateAIReply(context, nerves, trends)
 
-    // Store AI reply
     await storeAIReply(conversation_id, message, aiReply)
 
     res.json({ output: aiReply })
@@ -164,7 +160,7 @@ app.post('/api/chat', async (req, res) => {
   }
 })
 
-// Minimal ping endpoint for cron-job monitoring
+// Minimal ping endpoint
 app.get('/ping', (req, res) => res.send('OK'))
 
 // Root endpoint
